@@ -1,0 +1,141 @@
+# ==============================================================================
+# 📊 Simple Moving Average (SMA) Crossover Strategy Backtest using Polygon.io
+# ==============================================================================
+
+# This Jupyter notebook implements a basic backtesting framework for the 
+# SMA Crossover trading strategy using intraday 1-minute bar data from Polygon.io.
+
+# 💡 Strategy Description:
+# ------------------------
+# The SMA Crossover strategy enters a trade when a short-term moving average
+# (e.g., 9-period SMA) crosses above a longer-term moving average (e.g., 20-period SMA).
+# It exits the trade when the short-term SMA crosses back below the long-term SMA.
+
+# 🎯 Purpose:
+# ----------
+# - To help you visualize crossover-based trade signals.
+# - To calculate simple performance metrics (PnL, win rate).
+# - To assist with building your own indicator-based strategies in a modular way.
+
+# 🔧 How to Use:
+# -------------
+# 1. Set your desired symbol and date range in the Parameters section below.
+# 2. Insert your Polygon API key where indicated.
+# 3. Run all cells to fetch data, calculate signals, evaluate trades, and display plots.
+# 4. Tune short_window and long_window to see how signal behavior changes.
+
+# ⚠️ Pitfalls & Things to Be Aware Of:
+# ------------------------------------
+#
+# - 📉 **No Risk Management**:
+#     This version does not use stop-loss, take-profit, or slippage assumptions.
+#     It assumes perfect fills on crossovers, which is unrealistic for live trading.
+#
+# - 📊 **No Capital or Position Sizing**:
+#     All trades are recorded as 1:1 entry/exit events, not accounting for capital use or compounding.
+
+# - 🛠️ **Single Entry/Exit Cycle**:
+#     This logic does not support re-entries while already in a trade. You must exit before re-entering.
+
+# ==============================================================================
+
+# === 1. Parameters ===
+symbol = "AAPL"              # Ticker symbol
+start_date = "2024-07-01"    # Start date (YYYY-MM-DD)
+end_date = "2024-07-01"      # End date (YYYY-MM-DD)
+short_window = 9             # Short-term SMA window
+long_window = 20             # Long-term SMA window
+API_KEY = "INSERT_API_KEY"  # Insert your Polygon.io key here
+
+# === 2. Imports ===
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+# === 3. Fetch Data from Polygon ===
+def fetch_intraday(symbol, start, end, timespan='minute', limit=50000):
+    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/{timespan}/{start}/{end}"
+    params = {
+        "adjusted": "true",
+        "sort": "asc",
+        "limit": limit,
+        "apiKey": API_KEY
+    }
+    r = requests.get(url, params=params)
+    data = r.json().get("results", [])
+    df = pd.DataFrame(data)
+    if df.empty:
+        print("No data returned.")
+        return df
+    df['t'] = pd.to_datetime(df['t'], unit='ms')
+    df.set_index('t', inplace=True)
+    df.rename(columns={'c': 'close'}, inplace=True)
+    return df[['close']]
+
+df = fetch_intraday(symbol, start_date, end_date)
+
+# === 4. Strategy Logic ===
+def run_sma_crossover(df, short_window, long_window):
+    df = df.copy()
+    df['sma_short'] = df['close'].rolling(short_window).mean()
+    df['sma_long'] = df['close'].rolling(long_window).mean()
+    df['position'] = (df['sma_short'] > df['sma_long']).astype(int)
+    df['signal'] = df['position'].diff()
+    
+    trades = []
+    entry_price = None
+    entry_time = None
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        if row['signal'] == 1:
+            entry_price = row['close']
+            entry_time = row.name
+        elif row['signal'] == -1 and entry_price is not None:
+            exit_price = row['close']
+            exit_time = row.name
+            pnl = exit_price - entry_price
+            trades.append({
+                'entry_time': entry_time,
+                'exit_time': exit_time,
+                'entry_price': round(entry_price, 2),
+                'exit_price': round(exit_price, 2),
+                'pnl': round(pnl, 2)
+            })
+            entry_price = None
+    return df, trades
+
+if not df.empty:
+    df_with_signals, trades = run_sma_crossover(df, short_window, long_window)
+
+    # === 5. Evaluation ===
+    total_pnl = sum(t['pnl'] for t in trades)
+    win_rate = sum(1 for t in trades if t['pnl'] > 0) / len(trades) if trades else 0
+
+    print(f"📈 Total Trades: {len(trades)}")
+    print(f"💰 Total P&L: {round(total_pnl, 2)}")
+    print(f"✅ Win Rate: {round(win_rate * 100, 2)}%")
+
+    print("\n📋 Trade Details:")
+    for t in trades:
+        print(f"→ {t['entry_time']} Buy @ {t['entry_price']} | {t['exit_time']} Sell @ {t['exit_price']} | PnL: {t['pnl']}")
+
+    # === 6. Plotting ===
+    plt.figure(figsize=(15, 6))
+    plt.plot(df_with_signals.index, df_with_signals['close'], label='Close Price', color='black')
+    plt.plot(df_with_signals.index, df_with_signals['sma_short'], label=f"SMA {short_window}", alpha=0.7)
+    plt.plot(df_with_signals.index, df_with_signals['sma_long'], label=f"SMA {long_window}", alpha=0.7)
+
+    for t in trades:
+        plt.axvline(t['entry_time'], color='green', linestyle='--', alpha=0.5)
+        plt.axvline(t['exit_time'], color='red', linestyle='--', alpha=0.5)
+
+    plt.title(f"{symbol} SMA Crossover Strategy ({start_date} to {end_date})")
+    plt.xlabel("Time")
+    plt.ylabel("Price")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+else:
+    print("❌ No data to run strategy.")
