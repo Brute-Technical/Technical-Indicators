@@ -5,13 +5,13 @@
 # This Jupyter notebook implements a basic backtesting framework for the 
 # SMA Crossover trading strategy using intraday 1-minute bar data from Polygon.io.
 
-# 💡 Strategy Description:
+# Strategy Description:
 # ------------------------
 # The SMA Crossover strategy enters a trade when a short-term moving average
 # (e.g., 9-period SMA) crosses above a longer-term moving average (e.g., 20-period SMA).
 # It exits the trade when the short-term SMA crosses back below the long-term SMA.
 
-# 🎯 Purpose:
+# Purpose:
 # ----------
 # - To help you visualize crossover-based trade signals.
 # - To calculate simple performance metrics (PnL, win rate).
@@ -24,17 +24,17 @@
 # 3. Run all cells to fetch data, calculate signals, evaluate trades, and display plots.
 # 4. Tune short_window and long_window to see how signal behavior changes.
 
-# ⚠️ Pitfalls & Things to Be Aware Of:
+# Pitfalls & Things to Be Aware Of:
 # ------------------------------------
 #
-# - 📉 **No Risk Management**:
+# - **No Risk Management**:
 #     This version does not use stop-loss, take-profit, or slippage assumptions.
 #     It assumes perfect fills on crossovers, which is unrealistic for live trading.
 #
-# - 📊 **No Capital or Position Sizing**:
+# - **No Capital or Position Sizing**:
 #     All trades are recorded as 1:1 entry/exit events, not accounting for capital use or compounding.
 
-# - 🛠️ **Single Entry/Exit Cycle**:
+# - **Single Entry/Exit Cycle**:
 #     This logic does not support re-entries while already in a trade. You must exit before re-entering.
 
 # ==============================================================================
