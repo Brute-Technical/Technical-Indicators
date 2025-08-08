@@ -1,0 +1,215 @@
+# ==============================================================================
+# Triple SMA Play Backtest using Polygon.io
+# ==============================================================================
+#
+# Strategy Description:
+# ------------------------
+# This strategy uses three Simple Moving Averages (SMAs) — typically a fast, 
+# medium, and slow period (default: 5 / 13 / 21).  
+#
+# Entry Condition (Long):
+#   SMA_fast > SMA_medium > SMA_slow
+#   i.e., all three SMAs are strictly ordered from smallest period (fastest) 
+#   to largest period (slowest), with the price momentum fully aligned upward.
+#
+# Exit Condition:
+#   Any breakdown in the strict ordering — meaning that SMA_fast is no longer 
+#   above SMA_medium, or SMA_medium is no longer above SMA_slow.  
+#   This signals the end of the strong aligned momentum trend.
+#
+# Purpose:
+# ----------
+# - Identify moments when short-, mid-, and long-term trends are perfectly aligned.
+# - Capture sustained moves without whipsawing in and out on small pullbacks.
+# - Provide a framework that can be tuned with different SMA periods.
+#
+# 🔧 How to Use:
+# -------------
+# 1. Set your desired ticker symbol and date range in the Parameters section below.
+# 2. Insert your Polygon API key.
+# 3. Adjust fast_window, med_window, and slow_window to experiment with different 
+#    timeframes (e.g., 5/13/21 or 9/21/50).
+# 4. Run the script to:
+#     - Fetch intraday 1-minute OHLC data from Polygon
+#     - Calculate SMAs and signals
+#     - Backtest the entry/exit logic
+#     - Print trade stats and plot signals
+#
+# Pitfalls & Considerations:
+# --------------------------
+# - **Intraday Volatility**:
+#     On short intervals like 1-minute bars, strict SMA ordering may break 
+#     temporarily during small pullbacks, causing early exits.
+#
+# - **No Risk Management**:
+#     This basic version has no stop-loss or take-profit targets.
+#
+# - **No Capital Allocation**:
+#     Trades are recorded 1:1 with no compounding or partial positions.
+#
+# - **Data Gaps**:
+#     Polygon's intraday API may require batching for longer date ranges.
+#
+# ==============================================================================
+
+# === 1. Parameters ===
+symbol = "AAPL"              # Ticker symbol
+start_date = "2024-07-01"    # Start date (YYYY-MM-DD)
+end_date = "2024-07-01"      # End date (YYYY-MM-DD)
+
+fast_window = 5              # Fast SMA window
+med_window  = 13             # Medium SMA window
+slow_window = 21             # Slow SMA window
+
+API_KEY = "INSERT_API_KEY"   # <-- Insert your Polygon.io API key
+
+# === 2. Imports ===
+import requests
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# === 3. Fetch Data from Polygon ===
+def fetch_intraday(symbol, start, end, timespan='minute', limit=50000):
+    """
+    Fetch intraday bars from Polygon between [start, end].
+    Returns a DataFrame indexed by timestamp with 'close'.
+    """
+    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/{timespan}/{start}/{end}"
+    params = {
+        "adjusted": "true",
+        "sort": "asc",
+        "limit": limit,
+        "apiKey": API_KEY
+    }
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    data = r.json().get("results", [])
+    df = pd.DataFrame(data)
+    if df.empty:
+        print("No data returned.")
+        return df
+    df['t'] = pd.to_datetime(df['t'], unit='ms')
+    df.set_index('t', inplace=True)
+    df.rename(columns={'c': 'close'}, inplace=True)
+    return df[['close']]
+
+df = fetch_intraday(symbol, start_date, end_date)
+
+# === 4. Triple SMA Play Logic ===
+def run_triple_sma_play(df, fast_w, med_w, slow_w):
+    """
+    Implements Triple SMA Play:
+      - Long when SMA_fast > SMA_med > SMA_slow
+      - Exit when ordering breaks (strict inequality no longer holds)
+    One position at a time. Uses close-to-close fills at signal bars.
+    """
+    if df.empty:
+        return df, []
+
+    df = df.copy()
+    # SMAs
+    df['sma_fast'] = df['close'].rolling(fast_w, min_periods=fast_w).mean()
+    df['sma_med']  = df['close'].rolling(med_w,  min_periods=med_w).mean()
+    df['sma_slow'] = df['close'].rolling(slow_w, min_periods=slow_w).mean()
+
+    # Valid rows where all SMAs exist
+    valid = df[['sma_fast','sma_med','sma_slow']].notna().all(axis=1)
+
+    # Position: 1 if strict ordering holds, else 0
+    df['position'] = 0
+    df.loc[valid, 'position'] = (
+        (df['sma_fast'] > df['sma_med']) &
+        (df['sma_med']  > df['sma_slow'])
+    ).astype(int)
+
+    # Signals: +1 for entry, -1 for exit
+    df['signal'] = df['position'].diff().fillna(0)
+
+    trades = []
+    in_position = False
+    entry_price = None
+    entry_time  = None
+
+    for i in range(len(df)):
+        row = df.iloc[i]
+        ts = df.index[i]
+        # Entry
+        if row['signal'] == 1 and not in_position:
+            in_position = True
+            entry_price = row['close']
+            entry_time  = ts
+
+        # Exit
+        elif row['signal'] == -1 and in_position:
+            exit_price = row['close']
+            exit_time  = ts
+            pnl = exit_price - entry_price
+            trades.append({
+                'entry_time': entry_time,
+                'exit_time': exit_time,
+                'entry_price': round(float(entry_price), 4),
+                'exit_price': round(float(exit_price), 4),
+                'pnl': round(float(pnl), 4)
+            })
+            in_position = False
+            entry_price = None
+            entry_time  = None
+
+    # Close open trade at last bar
+    if in_position:
+        last_row = df.iloc[-1]
+        exit_price = last_row['close']
+        exit_time  = df.index[-1]
+        pnl = exit_price - entry_price
+        trades.append({
+            'entry_time': entry_time,
+            'exit_time': exit_time,
+            'entry_price': round(float(entry_price), 4),
+            'exit_price': round(float(exit_price), 4),
+            'pnl': round(float(pnl), 4)
+        })
+
+    return df, trades
+
+# === 5. Run Backtest & Evaluation ===
+if not df.empty:
+    df_sig, trades = run_triple_sma_play(df, fast_window, med_window, slow_window)
+
+    total_pnl = round(sum(t['pnl'] for t in trades), 4)
+    wins = sum(1 for t in trades if t['pnl'] > 0)
+    win_rate = (wins / len(trades) * 100) if trades else 0.0
+    gross_profit = sum(t['pnl'] for t in trades if t['pnl'] > 0)
+    gross_loss   = -sum(t['pnl'] for t in trades if t['pnl'] < 0)
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+
+    print(f"📈 Total Trades: {len(trades)}")
+    print(f"💰 Total P&L: {total_pnl}")
+    print(f"✅ Win Rate: {win_rate:.2f}%")
+    print(f"📊 Profit Factor: {profit_factor:.3f}")
+
+    if trades:
+        print("\n📋 Trade Details:")
+        for t in trades:
+            print(f"→ {t['entry_time']} Buy @ {t['entry_price']} | "
+                  f"{t['exit_time']} Sell @ {t['exit_price']} | PnL: {t['pnl']}")
+
+    # === 6. Plotting ===
+    plt.figure(figsize=(15, 6))
+    plt.plot(df_sig.index, df_sig['close'], label='Close', color='black')
+    plt.plot(df_sig.index, df_sig['sma_fast'], label=f"SMA {fast_window}", alpha=0.9)
+    plt.plot(df_sig.index, df_sig['sma_med'],  label=f"SMA {med_window}",  alpha=0.9)
+    plt.plot(df_sig.index, df_sig['sma_slow'], label=f"SMA {slow_window}", alpha=0.9)
+
+    for t in trades:
+        plt.axvline(t['entry_time'], color='green', linestyle='--', alpha=0.5)
+        plt.axvline(t['exit_time'],  color='red',   linestyle='--', alpha=0.5)
+
+    plt.title(f"{symbol} • Triple SMA Play ({start_date} to {end_date})")
+    plt.xlabel("Time")
+    plt.ylabel("Price")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+else:
+    print("❌ No data to run strategy.")
