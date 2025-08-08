@@ -1,5 +1,5 @@
 # ==============================================================================
-# 📊 Simple Moving Average (SMA) Crossover Strategy Backtest using Polygon.io
+# Simple Moving Average (SMA) Crossover Strategy Backtest using Polygon.io
 # ==============================================================================
 
 # This Jupyter notebook implements a basic backtesting framework for the 
